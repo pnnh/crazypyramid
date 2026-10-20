@@ -122,9 +122,15 @@ Plugins/**/Intermediate/*
 # Cache files for the editor to use
 DerivedDataCache/*
 
-# 忽略UE自动生成的ExternalActors文件夹
-__ExternalActors__/
-__ExternalObjects__/
+# 忽略UE自动生成的ExternalActors文件夹（旧的大世界关卡用，减小仓库体积）
+# 只忽略 Content/ 下按关卡名分的每个子文件夹，不用不限定路径的写法，
+# 这样才能精确放行下面指定的那一个关卡，而不会把其他关卡（NewMap/OpenWorld）也一起放出来
+Content/__ExternalActors__/*
+Content/__ExternalObjects__/*
+# 但 VoxelSandbox 下的关卡体积很小，且这些外部Actor文件里存着关卡实际需要的Actor数据
+# （比如 VoxelWorld、PlayerStart），必须提交，否则关卡clone下来是坏的
+!Content/__ExternalActors__/VoxelSandbox/
+!Content/__ExternalObjects__/VoxelSandbox/
 
 # Visual Studio
 .vs/
@@ -157,8 +163,6 @@ Thumbs.db
 /Plugins/**/Saved
 
 # UE5 Specific
-__ExternalActors__/
-__ExternalObjects__/
 *.uassetbak
 *_BuiltData.uasset
 *.umapbak
@@ -224,3 +228,8 @@ SourceArt/**/*.psd
 Build/*/**
 !Build/*/PakBlacklist*.txt
 !Build/**/*.ico
+
+#################################
+# Claude Code / Speckit         #
+#################################
+.claude/settings.local.json
