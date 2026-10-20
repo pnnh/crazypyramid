@@ -11,6 +11,7 @@ class UCameraComponent;
 class UInputMappingContext;
 class UInputAction;
 class UInputComponent;
+class UStaticMeshComponent;
 class AVoxelWorld;
 struct FInputActionValue;
 
@@ -24,11 +25,29 @@ public:
 
 protected:
 	virtual void BeginPlay() override;
+	virtual void Tick(float DeltaTime) override;
 	virtual void PossessedBy(AController* NewController) override;
 	virtual void SetupPlayerInputComponent(UInputComponent* PlayerInputComponent) override;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Voxel Character")
 	TObjectPtr<UCameraComponent> FirstPersonCamera;
+
+	// Bare-handed first-person arms, attached under FirstPersonCamera - one on each side of the
+	// view. Static meshes only - no skeleton/animation; idle sway is a per-frame sine offset
+	// applied in Tick (see research.md in 002-first-person-visuals for why). The left arm reuses
+	// the same mesh mirrored via negative Y scale rather than a second asset.
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Voxel Character")
+	TObjectPtr<UStaticMeshComponent> RightArmMeshComponent;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Voxel Character")
+	TObjectPtr<UStaticMeshComponent> LeftArmMeshComponent;
+
+	// Relative transforms each arm sways around, set once in BeginPlay so Tick can offset from
+	// them every frame without drifting.
+	FVector RightArmRestLocation = FVector::ZeroVector;
+	FRotator RightArmRestRotation = FRotator::ZeroRotator;
+	FVector LeftArmRestLocation = FVector::ZeroVector;
+	FRotator LeftArmRestRotation = FRotator::ZeroRotator;
 
 	UPROPERTY(EditAnywhere, Category = "Voxel Character|Input")
 	TObjectPtr<UInputMappingContext> DefaultMappingContext;

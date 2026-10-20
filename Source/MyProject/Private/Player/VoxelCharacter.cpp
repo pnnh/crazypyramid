@@ -2,6 +2,7 @@
 #include "Voxel/VoxelWorld.h"
 #include "Camera/CameraComponent.h"
 #include "Components/CapsuleComponent.h"
+#include "Components/StaticMeshComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/PlayerController.h"
 #include "EnhancedInputComponent.h"
@@ -10,6 +11,9 @@
 #include "InputAction.h"
 #include "InputActionValue.h"
 #include "Kismet/GameplayStatics.h"
+#include "UObject/ConstructorHelpers.h"
+#include "Engine/StaticMesh.h"
+#include "Materials/MaterialInterface.h"
 
 AVoxelCharacter::AVoxelCharacter()
 {
@@ -27,11 +31,51 @@ AVoxelCharacter::AVoxelCharacter()
 		// collision, leaving the character stuck in Falling (heavy air-control, broken jump).
 		// A flat-based floor check is the standard fix for blocky/voxel ground.
 		Movement->bUseFlatBaseForFloorChecks = true;
+
+		// Default JumpZVelocity (420) only clears ~90uu - just under a single 100uu voxel - so
+		// a 1-block-deep pit is sometimes impossible to escape. Raised to comfortably clear it.
+		Movement->JumpZVelocity = 550.f;
 	}
 
 	FirstPersonCamera = CreateDefaultSubobject<UCameraComponent>(TEXT("FirstPersonCamera"));
 	FirstPersonCamera->SetupAttachment(GetCapsuleComponent());
 	FirstPersonCamera->bUsePawnControlRotation = true;
+
+	// The mesh's local +X axis runs wrist-to-hand (see research.md), so identity rotation already
+	// points each arm forward into the screen; only a slight inward/upward tilt is added so the
+	// hands rise toward the center of the view, FPS-style.
+	RightArmMeshComponent = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("RightArmMeshComponent"));
+	RightArmMeshComponent->SetupAttachment(FirstPersonCamera);
+	RightArmMeshComponent->SetOnlyOwnerSee(true); // never visible from a third-person/spectator view
+	RightArmMeshComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision); // belt-and-braces: the
+	// aim trace already ignores this actor's components entirely (see research.md in
+	// 002-first-person-visuals), this just means the arm can't physically collide with anything
+	RightArmMeshComponent->SetCastShadow(false);
+	RightArmMeshComponent->SetRelativeLocation(FVector(20.f, 24.f, -20.f)); // forward, right, down - lower-right of view
+	RightArmMeshComponent->SetRelativeRotation(FRotator(10.f, -6.f, 0.f)); // tilt hand up, barely inward
+
+	LeftArmMeshComponent = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("LeftArmMeshComponent"));
+	LeftArmMeshComponent->SetupAttachment(FirstPersonCamera);
+	LeftArmMeshComponent->SetOnlyOwnerSee(true);
+	LeftArmMeshComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	LeftArmMeshComponent->SetCastShadow(false);
+	LeftArmMeshComponent->SetRelativeLocation(FVector(20.f, -24.f, -20.f)); // mirrored - lower-left of view
+	LeftArmMeshComponent->SetRelativeRotation(FRotator(10.f, 6.f, 0.f));
+	LeftArmMeshComponent->SetRelativeScale3D(FVector(1.f, -1.f, 1.f)); // mirror the same mesh into a left arm
+
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> ArmMeshFinder(TEXT("/Game/VoxelSandbox/Meshes/SM_FirstPersonArm.SM_FirstPersonArm"));
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> ArmMaterialFinder(TEXT("/Game/VoxelSandbox/Materials/M_FirstPersonArm.M_FirstPersonArm"));
+	for (UStaticMeshComponent* Arm : { RightArmMeshComponent, LeftArmMeshComponent })
+	{
+		if (ArmMeshFinder.Succeeded())
+		{
+			Arm->SetStaticMesh(ArmMeshFinder.Object);
+		}
+		if (ArmMaterialFinder.Succeeded())
+		{
+			Arm->SetMaterial(0, ArmMaterialFinder.Object);
+		}
+	}
 }
 
 void AVoxelCharacter::BeginPlay()
@@ -40,7 +84,41 @@ void AVoxelCharacter::BeginPlay()
 
 	FirstPersonCamera->SetRelativeLocation(FVector(0.f, 0.f, BaseEyeHeight));
 
+	if (RightArmMeshComponent)
+	{
+		RightArmRestLocation = RightArmMeshComponent->GetRelativeLocation();
+		RightArmRestRotation = RightArmMeshComponent->GetRelativeRotation();
+	}
+	if (LeftArmMeshComponent)
+	{
+		LeftArmRestLocation = LeftArmMeshComponent->GetRelativeLocation();
+		LeftArmRestRotation = LeftArmMeshComponent->GetRelativeRotation();
+	}
+
 	CachedVoxelWorld = Cast<AVoxelWorld>(UGameplayStatics::GetActorOfClass(GetWorld(), AVoxelWorld::StaticClass()));
+}
+
+void AVoxelCharacter::Tick(float DeltaTime)
+{
+	Super::Tick(DeltaTime);
+
+	// Idle "breathing" sway - the only motion the spec asks for (no skeleton/animation).
+	const float Time = GetWorld()->GetTimeSeconds();
+	const float SwayZ = FMath::Sin(Time * 1.5f) * 0.6f; // cm
+	const float SwayPitch = FMath::Sin(Time * 1.5f) * 0.6f; // degrees
+	const FVector SwayOffset(0.f, 0.f, SwayZ);
+	const FRotator SwayRotation(SwayPitch, 0.f, 0.f);
+
+	if (RightArmMeshComponent)
+	{
+		RightArmMeshComponent->SetRelativeLocation(RightArmRestLocation + SwayOffset);
+		RightArmMeshComponent->SetRelativeRotation(RightArmRestRotation + SwayRotation);
+	}
+	if (LeftArmMeshComponent)
+	{
+		LeftArmMeshComponent->SetRelativeLocation(LeftArmRestLocation + SwayOffset);
+		LeftArmMeshComponent->SetRelativeRotation(LeftArmRestRotation + SwayRotation);
+	}
 }
 
 void AVoxelCharacter::PossessedBy(AController* NewController)
@@ -83,7 +161,10 @@ void AVoxelCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComp
 		}
 		if (BreakAction)
 		{
-			EnhancedInput->BindAction(BreakAction, ETriggerEvent::Started, this, &AVoxelCharacter::HandleBreak);
+			// BreakAction carries an InputTriggerHold (see IA_Break asset) so this only fires
+			// once the player has held the button down for a short duration, Minecraft-style,
+			// instead of breaking instantly on press.
+			EnhancedInput->BindAction(BreakAction, ETriggerEvent::Triggered, this, &AVoxelCharacter::HandleBreak);
 		}
 		if (PlaceAction)
 		{

@@ -162,3 +162,13 @@ are worth recording so a future feature doesn't re-discover them the hard way.
   Blueprint) was what actually took effect. Lesson: when a C++ default change doesn't seem to
   "stick" for a Blueprint subclass, check (and if needed, directly set) the same property on the
   Blueprint's own CDO rather than assuming the native constructor alone controls it.
+- **With `r.DefaultFeature.AutoExposure.ExtendDefaultLuminanceRange=True` (physically-based
+  lighting units active, inherited from this project's engine config), a `DirectionalLight`
+  intensity of ~6 (a value that looked plausible copied from the template level) is drastically
+  under-lit — real sunlight is tens of thousands of lux. This made every surface, including the
+  grass top faces, render as a dark, almost-black green, which looked exactly like a missing-face
+  rendering bug but wasn't one. Confirmed by temporarily spiking the intensity to 50 and watching
+  lit faces jump to correctly bright green. Settled on 18 as a reasonably bright, non-blown-out
+  "sunny day" value for this scene. Deep, fully enclosed pits still render dark even at this
+  intensity — that part is expected (no GI/bounce lighting, see "Editor/content tooling split"
+  above), not a bug.

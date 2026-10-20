@@ -7,15 +7,20 @@ namespace
 		FIntVector Direction;
 		FVector Normal;
 		FVector CornerOffsets[4]; // unit-cube-local corners, listed so (0,1,2)+(0,2,3) winds outward
+		EVoxelFaceDirection AtlasFaceDirection; // which atlas lookup this physical face uses
 	};
 
+	// Quad UV for each corner above, in the same (0,1,2,3) order - a fixed CCW (0,0)->(1,0)->(1,1)->(0,1)
+	// mapping used for every face; only Grass's atlas-cell choice differs between Top and Side.
+	const FVector2D GQuadCornerUVs[4] = { FVector2D(0, 0), FVector2D(1, 0), FVector2D(1, 1), FVector2D(0, 1) };
+
 	const FVoxelFace GVoxelFaces[6] = {
-		{ FIntVector(1, 0, 0),  FVector(1.f, 0.f, 0.f),  { FVector(1, 0, 0), FVector(1, 0, 1), FVector(1, 1, 1), FVector(1, 1, 0) } },
-		{ FIntVector(-1, 0, 0), FVector(-1.f, 0.f, 0.f), { FVector(0, 0, 0), FVector(0, 1, 0), FVector(0, 1, 1), FVector(0, 0, 1) } },
-		{ FIntVector(0, 1, 0),  FVector(0.f, 1.f, 0.f),  { FVector(0, 1, 0), FVector(1, 1, 0), FVector(1, 1, 1), FVector(0, 1, 1) } },
-		{ FIntVector(0, -1, 0), FVector(0.f, -1.f, 0.f), { FVector(0, 0, 0), FVector(0, 0, 1), FVector(1, 0, 1), FVector(1, 0, 0) } },
-		{ FIntVector(0, 0, 1),  FVector(0.f, 0.f, 1.f),  { FVector(0, 0, 1), FVector(1, 0, 1), FVector(1, 1, 1), FVector(0, 1, 1) } },
-		{ FIntVector(0, 0, -1), FVector(0.f, 0.f, -1.f), { FVector(0, 0, 0), FVector(0, 1, 0), FVector(1, 1, 0), FVector(1, 0, 0) } },
+		{ FIntVector(1, 0, 0),  FVector(1.f, 0.f, 0.f),  { FVector(1, 0, 0), FVector(1, 0, 1), FVector(1, 1, 1), FVector(1, 1, 0) }, EVoxelFaceDirection::Side },
+		{ FIntVector(-1, 0, 0), FVector(-1.f, 0.f, 0.f), { FVector(0, 0, 0), FVector(0, 1, 0), FVector(0, 1, 1), FVector(0, 0, 1) }, EVoxelFaceDirection::Side },
+		{ FIntVector(0, 1, 0),  FVector(0.f, 1.f, 0.f),  { FVector(0, 1, 0), FVector(1, 1, 0), FVector(1, 1, 1), FVector(0, 1, 1) }, EVoxelFaceDirection::Side },
+		{ FIntVector(0, -1, 0), FVector(0.f, -1.f, 0.f), { FVector(0, 0, 0), FVector(0, 0, 1), FVector(1, 0, 1), FVector(1, 0, 0) }, EVoxelFaceDirection::Side },
+		{ FIntVector(0, 0, 1),  FVector(0.f, 0.f, 1.f),  { FVector(0, 0, 1), FVector(1, 0, 1), FVector(1, 1, 1), FVector(0, 1, 1) }, EVoxelFaceDirection::Top },
+		{ FIntVector(0, 0, -1), FVector(0.f, 0.f, -1.f), { FVector(0, 0, 0), FVector(0, 1, 0), FVector(1, 1, 0), FVector(1, 0, 0) }, EVoxelFaceDirection::Side },
 	};
 
 	EVoxelBlockType GetBlockSafe(const FVoxelChunkMeshInput& Input, int32 X, int32 Y, int32 Z)
@@ -77,14 +82,21 @@ FVoxelMeshData VoxelMeshBuilder::BuildChunkMeshData(const FVoxelChunkMeshInput& 
 						continue; // hidden face between two solid voxels - never emitted, which is what avoids z-fighting
 					}
 
+					const int32 CellIndex = VoxelBlockRules::GetAtlasCellIndex(BlockType, Face.AtlasFaceDirection);
+					const float CellWidth = 1.f / static_cast<float>(VoxelBlockRules::AtlasTotalCells);
+					const float UMin = CellIndex * CellWidth;
+					const float UMax = UMin + CellWidth;
+
 					const int32 BaseIndex = MeshData.Vertices.Num();
 					const FVector VoxelOrigin(static_cast<float>(X), static_cast<float>(Y), static_cast<float>(Z));
 					for (int32 Corner = 0; Corner < 4; ++Corner)
 					{
 						MeshData.Vertices.Add((VoxelOrigin + Face.CornerOffsets[Corner]) * Input.VoxelSize);
 						MeshData.Normals.Add(Face.Normal);
-						MeshData.VertexColors.Add(Color);
-						MeshData.UVs.Add(FVector2D(0.f, 0.f)); // unused: material reads vertex color, not UV
+						MeshData.VertexColors.Add(Color); // unused by the atlas material path; kept for parity with FVoxelMeshData's shape
+
+						const FVector2D& QuadUV = GQuadCornerUVs[Corner];
+						MeshData.UVs.Add(FVector2D(FMath::Lerp(UMin, UMax, QuadUV.X), QuadUV.Y));
 					}
 
 					MeshData.Triangles.Add(BaseIndex + 0);
